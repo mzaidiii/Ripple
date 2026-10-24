@@ -1,0 +1,40 @@
+package org.personal.ripple.services;
+
+import lombok.RequiredArgsConstructor;
+import org.personal.ripple.entity.AnalysisJob;
+import org.personal.ripple.entity.JobStatus;
+import org.personal.ripple.repository.AnalysisJobRepository;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.Optional;
+import java.util.UUID;
+
+@Service
+@RequiredArgsConstructor
+public class JobClaimService {
+
+    private final AnalysisJobRepository analysisJobRepository;
+
+    @Transactional
+    public Optional<AnalysisJob> claim(){
+        Optional<AnalysisJob> claimed = analysisJobRepository.claimNext();
+
+        claimed.ifPresent(job -> {
+            job.setStatus(JobStatus.RUNNING);
+            job.setStartedAt(Instant.now());
+            job.setAttempts(job.getAttempts() + 1);
+        });
+        return claimed;
+    }
+
+    @Transactional
+    public void markDone(UUID id ){
+        analysisJobRepository.findById(id).ifPresent(job ->{
+                    job.setStatus(JobStatus.DONE);
+                    job.setFinishedAt(Instant.now());
+                }
+                );
+    }
+}
