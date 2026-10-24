@@ -2,10 +2,14 @@ package org.personal.ripple.services;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.personal.ripple.entity.AnalysisJob;
 import org.personal.ripple.entity.DeliveryStatus;
+import org.personal.ripple.entity.JobStatus;
 import org.personal.ripple.entity.WebhookDelivery;
+import org.personal.ripple.repository.AnalysisJobRepository;
 import org.personal.ripple.repository.WebhookDeliveryRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -17,7 +21,9 @@ public class WebhookService {
 
     private final WebhookDeliveryRepository webRepo;
     private final ObjectMapper objectMapper;
+    private final AnalysisJobRepository analysisJobRepository;
 
+    @Transactional
     public void handlePush(String deliveryId, String payload) {
 
         if (webRepo.existsByDeliveryId(deliveryId)) {
@@ -30,7 +36,7 @@ public class WebhookService {
             root = objectMapper.readTree(payload);
         } catch (JacksonException e) {
             log.error("Invalid JSON payload for delivery {}", deliveryId);
-            throw new IllegalArgumentException("Invalid JSON payload");
+            throw new IllegalArgumentException("Invalid JSON payload", e);
         }
 
         String ref = root.path("ref").asString();
@@ -53,5 +59,17 @@ public class WebhookService {
         delivery.setStatus(DeliveryStatus.RECEIVED);
 
         webRepo.save(delivery);
+        makeJob(delivery);
+    }
+
+    private void makeJob(WebhookDelivery delivery){
+        AnalysisJob analysisJob = new AnalysisJob();
+        analysisJob.setDeliveryId(delivery.getDeliveryId());
+        analysisJob.setRepoFullName(delivery.getRepoFullName());
+        analysisJob.setBeforeSha(delivery.getBeforeSha());
+        analysisJob.setAfterSha(delivery.getAfterSha());
+
+        analysisJobRepository.save(analysisJob);
+        log.info("Job Created Successfully with delivery id {} and Repo name {}" , delivery.getDeliveryId() , delivery.getRepoFullName());
     }
 }
