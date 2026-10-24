@@ -8,6 +8,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.sql.SQLException;
+
 @Slf4j
 @RestController
 @RequiredArgsConstructor
@@ -30,12 +32,24 @@ public class WebhookController {
             try {
                 webhookService.handlePush(deliveryID,payload);
             } catch (DataIntegrityViolationException e){
-                log.warn(e.getLocalizedMessage());
-               return ResponseEntity.status(200).body("Duplicate(race)");
+                if (isUniqueViolation(e)) {
+                    log.info("Duplicate delivery {} (race)", deliveryID);
+                    return ResponseEntity.ok("Duplicate(race)");
+                }
+                log.error("Constraint violation for delivery {}", deliveryID, e);
+                throw e;
             }
-
             return ResponseEntity.ok("Update Received");
         }
         return ResponseEntity.ok("Update ignored");
+    }
+
+    private boolean isUniqueViolation(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof SQLException sql && "23505".equals(sql.getSQLState())) {
+                return true;
+            }
+        }
+        return false;
     }
 }
