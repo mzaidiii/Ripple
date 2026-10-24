@@ -45,4 +45,10 @@ public class AnalysisJob {
     private Instant createdAt;
 
     private Instant finishedAt;
+
+    private Instant startedAt;
+
+    @NotNull
+    @Column(nullable = false)
+    private Instant nextRunAt = Instant.now();
 }
