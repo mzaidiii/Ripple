@@ -14,9 +14,15 @@ public class JobWorker {
 
     @Scheduled(fixedDelay = 5000)
     void poll(){
+
         jobClaimService.claim().ifPresent(job ->{
-                    log.info("Received the job with id {} and name {}" , job.getId(),job.getRepoFullName());
-                    jobClaimService.markDone(job.getId());
+            try {
+                log.info("Received the job with id {} and name {}" , job.getId(),job.getRepoFullName());
+                jobClaimService.markDone(job.getId());
+            } catch (Exception e){
+                jobClaimService.markFailed(job.getId(),e.toString());
+            }
+
                 }
                 );
     }
