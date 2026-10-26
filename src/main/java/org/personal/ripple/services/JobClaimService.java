@@ -37,4 +37,20 @@ public class JobClaimService {
                 }
                 );
     }
+
+    @Transactional
+    public void markFailed(UUID id , String error ){
+        analysisJobRepository.findById(id).ifPresent(job ->{
+            int attempts = job.getAttempts();
+            job.setLastError(error);
+            if(attempts >=3){
+                job.setStatus(JobStatus.FAILED);
+                job.setFinishedAt(Instant.now());
+            } else {
+                job.setStatus(JobStatus.PENDING);
+                job.setNextRunAt(Instant.now().plusSeconds(attempts*30L));
+            }
+        });
+    }
+
 }
