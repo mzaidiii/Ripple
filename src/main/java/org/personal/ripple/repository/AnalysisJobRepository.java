@@ -1,9 +1,12 @@
 package org.personal.ripple.repository;
 
 import org.personal.ripple.entity.AnalysisJob;
+import org.personal.ripple.entity.JobStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -17,4 +20,6 @@ public interface AnalysisJobRepository extends JpaRepository<AnalysisJob, UUID> 
         FOR UPDATE SKIP LOCKED
         """,nativeQuery = true)
     Optional<AnalysisJob> claimNext();
+
+    List<AnalysisJob> findByStatusAndStartedAtBefore(JobStatus status, Instant cutoff);
 }
