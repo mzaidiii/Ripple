@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -53,4 +54,26 @@ public class JobClaimService {
         });
     }
 
+    @Transactional
+    public void cleanUp() {
+        Instant cutoff = Instant.now().minusSeconds(600);
+
+        List<AnalysisJob> leftOver =
+                analysisJobRepository.findByStatusAndStartedAtBefore(
+                        JobStatus.RUNNING, cutoff
+                );
+
+        for (AnalysisJob job : leftOver) {
+            if (job.getAttempts() >= 3) {
+                job.setStatus(JobStatus.FAILED);
+                job.setFinishedAt(Instant.now());
+            } else {
+                job.setStatus(JobStatus.PENDING);
+                job.setNextRunAt(Instant.now().plusSeconds(30));
+            }
+
+            job.setLastError("Recovered after worker timeout");
+            job.setStartedAt(null);
+        }
+    }
 }
