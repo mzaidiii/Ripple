@@ -26,4 +26,9 @@ public class JobWorker {
                 }
                 );
     }
+
+    @Scheduled(fixedDelay = 60000)
+    void clean(){
+        jobClaimService.cleanUp();
+    }
 }
