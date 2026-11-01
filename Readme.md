@@ -1,117 +1,101 @@
 # Ripple
 
-Ripple is a backend service that receives GitHub push events and turns each one into a queued analysis job. The long-term goal is a GitHub App that summarises code changes, reports their impact with evidence, and answers questions about a single project. This repository currently contains the ingestion layer and the first version of the job worker: verified webhook intake, deduplication, durable storage, a PostgreSQL-backed job queue, and a scheduled worker that claims jobs safely.
+Ripple turns every GitHub push into a short, plain-language summary of what changed. It receives the push webhook, fetches the real diff from GitHub, asks an LLM to summarise it, and stores the result in PostgreSQL. It is built as a background-job system, so the webhook answers GitHub immediately and the slow work happens in a worker.
 
-## Status
+This is a personal backend project. It is a work in progress, and the roadmap at the bottom shows where it is heading: a chatbot that answers questions about a repository's history, and later an impact analysis of each change.
 
-Under active development. Implemented and tested: webhook ingestion, job creation, and a worker that claims pending jobs and marks them done. The processing step inside the worker is a placeholder for now. Retries, recovery of stuck jobs, GitHub API integration, summarisation, and the chatbot are planned (see the roadmap).
+## Example
 
-## How it works
+Push a small commit to a connected repository and, about half a minute later, a row like this appears in the database. This one came from a test repository:
 
-```
-GitHub push event
-      |
-      v
-POST /api/webhooks/github
-      |
-      |-- verify HMAC-SHA256 signature  --> 401 if invalid
-      |-- ignore events other than "push"
-      |
-      v
-single database transaction
-      |-- reject duplicate delivery ids
-      |-- store the raw delivery
-      |-- create a PENDING analysis job
-      v
-200 OK returned to GitHub
+> Getter and setter methods have been added to the `Book` class for the `title`, `author`, and `price` attributes, including validation in `setPrice` to prevent negative values. The `ConstructorDemo` driver class was also updated to demonstrate modifying and retrieving a book's price using these new methods. This change improves encapsulation and data integrity by allowing controlled, safe access to the object's fields after instantiation.
 
-                    (later, independently)
-scheduled worker, every 5 seconds
-      |
-      v
-claim one job in a short transaction
-      |-- SELECT ... FOR UPDATE SKIP LOCKED
-      |-- status = RUNNING, started_at = now, attempts + 1
-      v
-do the work (placeholder)
-      v
-mark the job DONE in a second short transaction
+## Architecture
+
+```mermaid
+flowchart LR
+    GH["GitHub"] -->|"push webhook"| API["Webhook endpoint"]
+    API -->|"verify signature, deduplicate, create job"| DB[("PostgreSQL")]
+    W["Scheduled worker"] -->|"claim job"| DB
+    W -->|"fetch diff"| GHAPI["GitHub compare API"]
+    W -->|"summarise diff"| LLM["Gemini API"]
+    W -->|"store summary"| DB
 ```
 
-GitHub expects a reply within a few seconds, so the endpoint only records what happened and queues the work. Anything slow runs in the worker, outside the request.
+## How a push is processed
 
-Design decisions in the current code:
+```mermaid
+sequenceDiagram
+    participant GH as GitHub
+    participant API as Webhook endpoint
+    participant DB as PostgreSQL
+    participant W as Worker
+    participant GA as GitHub API
+    participant LLM as Gemini
 
-- Signatures are checked against the raw request body with a constant-time comparison before anything is parsed or stored.
-- Each delivery is identified by GitHub's delivery id, which is unique in both tables. A redelivery is detected and acknowledged without creating a second row.
-- The delivery row and the job row are written in one transaction, so a push is never recorded without a job.
-- Two identical deliveries arriving at the same moment can both pass the existence check. The unique constraint rejects the second insert, and the controller handles that case as a duplicate.
-- Workers claim jobs with `FOR UPDATE SKIP LOCKED`, so a row locked by one worker is skipped by the others instead of being taken twice.
-- Claiming and finishing are separate short transactions. No database lock is held while a job is being processed.
-- A partial index on pending jobs keeps the claim query fast as finished jobs accumulate.
-- Secrets are read from environment variables and are never committed.
+    GH->>API: POST push event, signed
+    API->>API: verify HMAC signature
+    API->>DB: store delivery and create PENDING job in one transaction
+    API-->>GH: 200 OK
+    Note over W,DB: the worker polls every 5 seconds
+    W->>DB: claim one job with SKIP LOCKED
+    W->>GA: compare before...after
+    GA-->>W: changed files and patches
+    W->>LLM: summarise the combined patches
+    LLM-->>W: summary
+    W->>DB: store summary and mark job DONE in one transaction
+```
 
-## Tech stack
+## Job lifecycle
 
-- Java and Spring Boot (Web, Data JPA, Validation, Actuator, scheduling)
-- PostgreSQL
-- Flyway for schema migrations, with Hibernate set to `validate` so the entities are checked against the real schema on startup
-- Lombok
-- Maven (wrapper included)
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING
+    PENDING --> RUNNING: claimed by a worker
+    RUNNING --> DONE: summary stored
+    RUNNING --> PENDING: failed, retry after a delay
+    RUNNING --> PENDING: stuck after a crash, recovered
+    RUNNING --> FAILED: failed on the third attempt
+    DONE --> [*]
+    FAILED --> [*]
+```
 
-## Database schema
+## Design decisions
 
-Migrations live in `src/main/resources/db/migration`.
+- **The webhook only records and queues.** GitHub expects a reply within seconds, so the endpoint verifies the signature, stores the delivery, creates a job, and returns. Fetching diffs and calling an LLM happen later in the worker.
+- **Every request is authenticated.** Signatures are checked against the raw request body with a constant-time comparison before anything is parsed or stored. Invalid requests get a 401 and leave no trace in the database.
+- **Duplicates are harmless.** GitHub's delivery id is unique in the database, so a redelivery or a simultaneous duplicate cannot create a second job.
+- **Jobs are claimed safely.** Workers use `SELECT ... FOR UPDATE SKIP LOCKED`, so a job locked by one worker is skipped by the others. Claiming and finishing are short transactions, and no lock is held during network calls.
+- **Failures are expected.** A failed job is retried with a growing delay and becomes `FAILED` after three attempts, keeping its error. A recovery task returns jobs that were left in `RUNNING` by a crash.
+- **Results are all-or-nothing.** The summary and the `DONE` status are written in one transaction, so a job is never done without its summary.
+- **The LLM is swappable.** The worker depends on a small `LlmClient` interface, and the model name is stored with each summary.
 
-| Migration | Purpose |
-|---|---|
-| V1 | `webhook_deliveries` table |
-| V2 | `analysis_jobs` table |
-| V3 | `started_at` and `next_run_at` columns on `analysis_jobs` |
-| V4 | partial index on pending jobs |
-
-`webhook_deliveries` is an append-only record of what GitHub sent.
-
-| Column | Notes |
-|---|---|
-| delivery_id | unique, taken from the `X-GitHub-Delivery` header |
-| event type, repository, ref, before and after SHAs | extracted from the payload |
-| payload | the full request body as `jsonb` |
-| status | `RECEIVED` or `REJECTED` |
-| timestamps | `timestamptz` |
-
-`analysis_jobs` is the working queue.
-
-| Column | Notes |
-|---|---|
-| id | UUID primary key |
-| delivery_id | unique, foreign key to `webhook_deliveries`, so one push produces at most one job |
-| repo_full_name, before_sha, after_sha | copied from the delivery so a worker reads one narrow row |
-| status | `PENDING`, `RUNNING`, `DONE` or `FAILED`, enforced by a check constraint |
-| attempts | incremented each time a worker claims the job |
-| last_error | text |
-| started_at | set when a worker claims the job |
-| next_run_at | the job is not eligible before this time, used for retry delays |
-| created_at, finished_at | `timestamptz` |
+The table layouts and migration history are in [docs/DATABASE.md](docs/DATABASE.md).
 
 ## Getting started
 
 ### Prerequisites
 
-- A JDK compatible with the version declared in `pom.xml`
-- PostgreSQL running locally, with an empty database for Ripple
-- A tunnelling tool such as ngrok for receiving webhooks on your machine
+- A JDK compatible with the version in `pom.xml`
+- PostgreSQL with an empty database for Ripple
+- ngrok or a similar tunnel to receive webhooks locally
+- A GitHub fine-grained personal access token with read-only access to repository contents, limited to the repositories you want to read
+- A Gemini API key from Google AI Studio
 
 ### Configuration
 
-The database connection settings are in `src/main/resources/application.properties`. Two values are supplied through environment variables and have no defaults:
+Connection settings are in `src/main/resources/application.properties`. Four secrets come from environment variables and have no defaults:
 
 | Variable | Purpose |
 |---|---|
-| `DB_PASSWORD` | password for the PostgreSQL user |
-| `GITHUB_WEBHOOK_SECRET` | shared secret used to verify webhook signatures |
+| `DB_PASSWORD` | PostgreSQL password |
+| `GITHUB_WEBHOOK_SECRET` | shared secret for verifying webhook signatures |
+| `GITHUB_TOKEN` | token for reading diffs from the GitHub API |
+| `GEMINI_API_KEY` | key for the Gemini API |
 
-Set both in your shell or run configuration before starting the application.
+The model is set with the `gemini.model` property (currently `gemini-2.5-flash`).
+
+On the free tier of the Gemini API, Google's terms allow submitted content to be used to improve its products. Use throwaway repositories while testing, and check the provider's data terms before connecting private code.
 
 ### Run
 
@@ -119,53 +103,68 @@ Set both in your shell or run configuration before starting the application.
 ./mvnw spring-boot:run
 ```
 
-Flyway applies the migrations on startup. The server listens on port 8080 and the worker starts polling immediately.
+Flyway applies the migrations on startup. The server listens on port 8080 and the worker starts polling.
 
-### Connect a GitHub repository
+### Connect a repository
 
-1. Start a tunnel: `ngrok http 8080`
+1. Start a tunnel with `ngrok http 8080`.
 2. In the repository settings, add a webhook with the payload URL `https://<your-tunnel-host>/api/webhooks/github`.
-3. Set the content type to `application/json`.
-4. Enter the same value you used for `GITHUB_WEBHOOK_SECRET` as the secret.
-5. Select the push event only.
+3. Set the content type to `application/json`, use your `GITHUB_WEBHOOK_SECRET` as the secret, and select the push event only.
+4. Push a commit.
 
-Push a commit. The application log shows the push, then the worker claiming the job within a few seconds. To inspect the result:
+The application log shows the push, the diff being fetched, and the summary. To read the stored results:
 
 ```sql
-SELECT delivery_id, status FROM webhook_deliveries;
-SELECT repo_full_name, status, attempts, started_at, finished_at
+SELECT repo_full_name, status, attempts, finished_at
 FROM analysis_jobs ORDER BY created_at DESC LIMIT 5;
+
+SELECT job_id, model, summary
+FROM change_summaries ORDER BY created_at DESC LIMIT 5;
 ```
 
 ## Verified behaviour
 
-The following cases were exercised manually against a real repository:
+These cases were tested manually against a real repository:
 
-- A push creates one delivery row and one `PENDING` job.
-- Redelivering the same push from GitHub is logged as a duplicate and adds no rows.
-- A request with a missing or invalid signature returns 401 and stores nothing.
-- A failure after the delivery is saved rolls back both inserts, and a later redelivery succeeds.
-- The worker claims a pending job, sets `RUNNING`, `started_at` and `attempts = 1`, and then marks it `DONE` with `finished_at` set.
+- A push creates one delivery and one pending job.
+- Redelivering a push adds nothing.
+- An invalid or missing signature returns 401 and stores nothing.
+- A failure while saving rolls back everything, and a later redelivery succeeds.
+- The worker fetches the diff, stores a Gemini summary with the model name, and the job ends `DONE`.
+- A forced failure goes through three attempts with growing delays and ends `FAILED` with the error kept.
+- Jobs left in `RUNNING` by an earlier run are recovered and processed.
 
-Testing with several workers at once, and automated integration tests, are planned (see the roadmap).
+Testing with several workers at once, and automated integration tests, are still to do.
+
+## Tech stack
+
+Java, Spring Boot (Web, Data JPA, Validation, Actuator, scheduling), PostgreSQL, Flyway, Spring `RestClient`, Google Gemini API, Lombok, Maven.
 
 ## Project layout
 
 ```
 org.personal.ripple
   controller    HTTP endpoints
-  services      webhook handling, job claiming, scheduled worker
+  services      webhook handling, job claiming, scheduled worker, summary storage
   entity        JPA entities and enums
   repository    Spring Data repositories
   security      signature verification
+  github        GitHub API client and response records
+  llm           LlmClient interface and the Gemini implementation
 ```
+
+## Known limitations
+
+- Each push is summarised with one LLM call over the combined patches. Very large pushes are not split or truncated yet.
+- Branch creation and deletion pushes are not special-cased.
+- Scheduled tasks share one thread, so a slow LLM call delays the next poll.
+- The GitHub token is a personal access token. A GitHub App with installation tokens is planned.
 
 ## Roadmap
 
-1. Failure handling: retries with increasing delay, a limit of three attempts, and a `FAILED` state that keeps the error for inspection.
-2. Recovery of jobs left in `RUNNING` after a crash, based on `started_at`.
-3. Fetch the real change from GitHub's compare API and move to a GitHub App with installation tokens.
-4. LLM-generated change summaries, posted back to the pull request or commit.
-5. Code indexing with pgvector and a project-scoped chatbot with citations.
-6. Impact analysis for Java code using a dependency graph built from the source.
-7. Hardening: Kafka in place of the job table, Redis, Testcontainers tests including concurrent workers, load tests, metrics.
+1. Retrieval and chat: embed summaries, diffs, and commit messages with pgvector, and add a repository-scoped chat endpoint that cites the commits and files it used and declines questions it has no evidence for. A command-line client will call it.
+2. Index the full repository once when it is connected, so questions can cover code that has not changed since the webhook was added.
+3. Post the summary back to GitHub as a comment.
+4. Move to a GitHub App with installation tokens.
+5. Impact analysis for Java code using a dependency graph built from the source.
+6. Hardening: Kafka in place of the job table, Redis, Testcontainers tests including concurrent workers, load tests, metrics.
