@@ -17,6 +17,7 @@ import java.util.UUID;
 public class JobClaimService {
 
     private final AnalysisJobRepository analysisJobRepository;
+    private final SummaryService summaryService;
 
     @Transactional
     public Optional<AnalysisJob> claim(){
@@ -75,5 +76,11 @@ public class JobClaimService {
             job.setLastError("Recovered after worker timeout");
             job.setStartedAt(null);
         }
+    }
+
+    @Transactional
+    public void complete(UUID id , String summary , String model ){
+        summaryService.save(id , summary, model);
+        markDone(id);
     }
 }
