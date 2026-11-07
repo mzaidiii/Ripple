@@ -2,6 +2,7 @@ package org.personal.ripple.llm;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -15,9 +16,14 @@ public class GeminiClient implements LlmClient{
 
     public GeminiClient(@Value("${gemini.api-key}") String apiKey , @Value("${gemini.model}") String model){
         this.model = model;
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(5000);
+        factory.setReadTimeout(60000);
         this.restClient = RestClient.builder()
                 .baseUrl("https://generativelanguage.googleapis.com/v1beta")
-                .defaultHeader("x-goog-api-key", apiKey).build();
+                .defaultHeader("x-goog-api-key", apiKey)
+                .requestFactory(factory)
+                .build();
     }
 
     @Override
