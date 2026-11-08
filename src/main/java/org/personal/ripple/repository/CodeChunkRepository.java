@@ -21,4 +21,7 @@ public interface CodeChunkRepository extends JpaRepository<CodeChunk , UUID> {
     List<CodeChunk> findNearest(@Param("repo") String repo,
                                 @Param("embedding") String embedding,
                                 @Param("limit") int limit);
+
+    List<CodeChunk> findByRepoFullName(String repoFullName);
+
 }

@@ -38,4 +38,12 @@ public class GitHubClient {
                .body(byte[].class);
    }
 
+    public String getCommitSha(String repoFullName, String ref){
+       return restClient.get()
+               .uri("/repos/" + repoFullName + "/commits/" + ref)
+               .retrieve()
+               .body(RefCommit.class)
+               .sha;
+    }
+    private record RefCommit(String sha) {}
 }
