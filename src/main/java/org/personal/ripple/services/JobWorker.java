@@ -2,10 +2,12 @@ package org.personal.ripple.services;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.personal.ripple.entity.RepoStatus;
 import org.personal.ripple.github.CompareResult;
 import org.personal.ripple.github.FileItem;
 import org.personal.ripple.github.GitHubClient;
 import org.personal.ripple.llm.LlmClient;
+import org.personal.ripple.repository.TrackedRepoRepository;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -18,6 +20,8 @@ public class JobWorker {
     private final GitHubClient gitHubClient;
     private final LlmClient llmClient;
     private final SummaryService summaryService;
+    private final TrackedRepoRepository trackedRepoRepository;
+    private final IndexRunner indexRunner;
 
 
     @Scheduled(fixedDelay = 5000)
@@ -44,6 +48,11 @@ public class JobWorker {
                 } else {
                     jobClaimService.markDone(job.getId());
                 }
+                try {
+                    syncIndex(job.getRepoFullName());
+                } catch (Exception e) {
+                    log.warn("Index sync failed for {}", job.getRepoFullName(), e);
+                }
             } catch (Exception e){
                 jobClaimService.markFailed(job.getId(),e.toString());
             }
@@ -55,5 +64,15 @@ public class JobWorker {
     @Scheduled(fixedDelay = 60000)
     void clean(){
         jobClaimService.cleanUp();
+    }
+
+    private void syncIndex(String repo) {
+        trackedRepoRepository.findByFullName(repo)
+                .filter(r -> r.getStatus() == RepoStatus.READY)
+                .ifPresent(r -> {
+                    if (trackedRepoRepository.markIndexing(repo) == 1) {
+                        indexRunner.run(repo, "HEAD");
+                    }
+                });
     }
 }
