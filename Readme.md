@@ -1,8 +1,31 @@
 # Ripple
 
-Ripple keeps the context of a code repository, so you do not have to explain it to an LLM again every time. It turns every GitHub push into a short, plain-language summary, and it indexes the repository's code as vectors for retrieval. The goal is a chat that finds the few chunks of code that matter for a question, instead of making a model read the whole codebase on every request.
+> An intelligent, context-aware repository intelligence platform and semantic code retrieval engine built with **Java 21**, **Spring Boot**, **PostgreSQL (`pgvector`)**, and the **Google Gemini API**.
 
-It is a personal backend project, built with Java and Spring Boot, and it is a work in progress. The roadmap at the bottom shows what is next.
+---
+
+## What Exactly is Ripple?
+
+**Ripple** is a backend system designed to bridge the gap between large software codebases and Large Language Models (LLMs). Instead of dumping entire directories of code into prompts or repeatedly explaining your codebase structure, Ripple maintains an ongoing, living understanding of your repository.
+
+It does this through two core capabilities:
+1. **Automated Commit Summaries**: It listens to GitHub `push` webhooks in real time, fetches the exact commit diffs via GitHub's API, and uses Gemini to craft clear, human-readable summaries of what changed and why it matters.
+2. **Semantic Code Retrieval & Grounded Chat (RAG)**: It downloads and indexes repository snapshots, splits source files into overlapping windows, hashes each chunk to prevent redundant work, generates 768-dimensional vector embeddings, and stores them in PostgreSQL with `pgvector`. When you ask a question, Ripple retrieves only the few relevant snippets with similarity scores above a strict cutoff, feeding them to Gemini to generate answers backed by **exact file paths and line citations**.
+
+---
+
+## The Problem It Solves & How I Encountered It
+
+When working on software projects alongside AI models, I kept hitting the same frustrating wall:
+
+* **The "Context Amnesia" Tax**: Every time I opened a new chat or wanted to ask a question (*"How does our retry backoff work?"* or *"Where do we validate webhook signatures?"*), I had to manually copy-paste hundreds of lines of code or re-explain the whole architecture from scratch.
+* **Token Waste & Latency**: Feeding full files into an LLM context window quickly burns API quotas, incurs high token costs, and slows down responses.
+* **Codebases Evolve Fast**: In active projects with frequent commits, static documentation gets outdated immediately. An LLM that doesn't know what changed in the latest push will give stale or misleading advice.
+* **The Hallucination Trap**: Standard LLMs often guess method names or assume files exist when they lack exact context.
+
+I built **Ripple** to solve this permanently. I wanted a self-hosted, lightweight backend that acts as an automated repository memory bank. Whenever anyone pushes code, Ripple automatically digests the diff. When you have a question, you ask Ripple via terminal or API, and it pinpoints the exact 20–40 lines of code responsible, explaining it with surgical precision and citing the exact line numbers.
+
+---
 
 ## Example
 
@@ -299,3 +322,16 @@ org.personal.ripple
 4. **AST-Aware Semantic Chunking**: Split code by class and method boundaries using syntax tree parsing rather than fixed 40-line windows.
 5. **Hybrid Search (BM25 + Vector)**: Combine Postgres full-text search with vector similarity for exact identifier and symbol lookups.
 6. **GitHub App Comments**: Post change summaries directly back to GitHub PRs and commits as comments.
+
+---
+
+## About Me
+
+Hi, I'm **Mohd Murtaza** ([@mzaidiii](https://github.com/mzaidiii)).
+
+I'm a backend and systems software developer passionate about building resilient distributed systems, clean Java & Spring Boot architectures, and practical AI/LLM developer tooling. I love exploring the intersection of database internals, vector search (`pgvector`), and real-time developer workflows.
+
+Feel free to connect, collaborate, or share feedback:
+* **GitHub**: [@mzaidiii](https://github.com/mzaidiii)
+* **Email**: [mohdmurtaza153@gmail.com](mailto:mohdmurtaza153@gmail.com)
+* **Repository**: [https://github.com/mzaidiii/Ripple](https://github.com/mzaidiii/Ripple)
