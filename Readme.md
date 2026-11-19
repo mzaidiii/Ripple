@@ -155,7 +155,55 @@ SELECT repo_full_name, count(*) FROM code_chunks GROUP BY repo_full_name;
 
 ### Ask questions about a repository (Chat)
 
-Once indexed, send a question to the repository:
+#### Option 1: Interactive CLI Tool (Recommended)
+
+Ripple includes an interactive terminal chat client. While the server is running, open a terminal and run:
+
+```bash
+# On Windows
+.\chat.cmd <owner>/<repo>
+
+# On Linux / macOS
+./chat.sh <owner>/<repo>
+```
+
+The CLI automatically verifies repository status, prompts to trigger indexing if needed, and starts an interactive session:
+
+```text
+============================================================
+               R I P P L E   C H A T   C L I
+     Semantic Codebase Intelligence & Retrieval (RAG)
+============================================================
+
+[✓] Repository status: READY (SHA: 4f1a8c9)
+Ready! Ask any question about octocat/Hello-World.
+
+[octocat/Hello-World] > How are duplicate webhook deliveries handled?
+Searching code chunks & generating grounded answer...
+
+──────────────────────────────────────────────────────────────────────
+Answer (gemini-3.5-flash-lite):
+──────────────────────────────────────────────────────────────────────
+Duplicate webhook deliveries are handled primarily in WebhookService.java...
+
+Citations (2 references):
+  [1] src/main/java/org/personal/ripple/services/WebhookService.java:26-64 (similarity: 0.884)
+      "if (webRepo.existsByDeliveryId(deliveryId)) {"
+  [2] src/main/java/org/personal/ripple/controller/WebhookController.java:30-54 (similarity: 0.792)
+      "try { webhookService.handlePush(deliveryID,payload);"
+──────────────────────────────────────────────────────────────────────
+```
+
+Commands inside CLI:
+- `:status` - Check indexing status and commit SHA
+- `:index` - Trigger background re-indexing
+- `:topk <n>` - Set number of code chunks to retrieve (default: 5)
+- `:minscore <f>` - Set minimum similarity cutoff (default: 0.55)
+- `exit` or `quit` - Exit
+
+#### Option 2: REST API
+
+Send a `POST` request to `/api/repos/<owner>/<repo>/chat`:
 
 ```bash
 curl -X POST http://localhost:8080/api/repos/<owner>/<repo>/chat \
@@ -167,7 +215,7 @@ curl -X POST http://localhost:8080/api/repos/<owner>/<repo>/chat \
   }'
 ```
 
-The response includes the grounded answer, citations with exact file paths and line ranges, and similarity scores:
+Response format:
 
 ```json
 {
@@ -206,39 +254,48 @@ Removal of outdated chunks, testing with several workers at once, and automated 
 
 ## Known limitations
 
-- Indexing is started from code for now. An endpoint to trigger it and a table to track indexed repositories are the next step.
-- Code is split into fixed windows of 40 lines with a 5-line overlap. Splitting by class and method is planned.
+- Code is split into fixed windows of 40 lines with a 5-line overlap. Splitting by class and method (AST-based) is planned.
 - Only common source and text files are indexed. Configuration files such as `.properties` and `.yml` are skipped on purpose, because they often contain secrets. Very large and binary files are skipped too.
-- A repository of more than 2,000 chunks is refused.
-- Indexing speed is limited by the embedding API's rate limits, so it pauses between batches. About 60 chunks take around a minute.
+- A repository of more than 2,000 chunks is refused in a single indexing run.
+- Indexing speed is paced to respect the embedding API's rate limits (batches of 20 with pauses).
 - Each push is summarised with one LLM call over the combined patches. Very large pushes are not split or truncated yet.
-- Branch creation and deletion pushes are not special-cased.
 - Scheduled tasks share one thread, so a slow LLM call delays the next poll.
-- The GitHub token is a personal access token, so only public repositories or ones the token can read work. A GitHub App with installation tokens is planned.
+- The GitHub token is a personal access token, so only public repositories or ones the token can read work. A GitHub App with installation tokens is planned for multi-tenant setups.
 
 ## Tech stack
 
-Java, Spring Boot (Web, Data JPA, Validation, Actuator, scheduling), PostgreSQL with pgvector, Flyway, Spring `RestClient`, Google Gemini API (summaries and embeddings), Lombok, Maven.
+Java 21, Spring Boot (Web, Data JPA, Validation, Actuator, scheduling), PostgreSQL with pgvector, Flyway, Spring `RestClient`, Google Gemini API (summaries and embeddings), Lombok, Maven.
 
 ## Project layout
 
 ```
 org.personal.ripple
-  controller    HTTP endpoints
-  services      webhook handling, job claiming, scheduled worker, summary storage, indexing
-  entity        JPA entities and enums
-  repository    Spring Data repositories
-  security      signature verification
+  cli           Interactive CLI chat client (RippleChatCli)
+  controller    HTTP endpoints (RepoController, WebhookController, ChatController)
+  dto           Request/Response DTOs and records (ChatRequest, ChatResponse, Citation)
+  services      Webhook handling, job claiming, scheduled worker, summary storage, indexing, chat
+  entity        JPA entities and enums (AnalysisJob, ChangeSummary, CodeChunk, TrackedRepo, etc.)
+  repository    Spring Data repositories (CodeChunkRepository, AnalysisJobRepository, etc.)
+  security      HMAC SHA-256 signature verification
   github        GitHub API client, zip reader, chunker, hashing, response records
   llm           LlmClient and EmbeddingClient interfaces and their Gemini implementations
 ```
 
-## Roadmap
+## Milestone Status & Roadmap
 
-1. [x] Track repositories in a table and add an endpoint that starts indexing in the background.
-2. [x] Chat endpoint: embed the question, retrieve the closest chunks above a relevance cutoff, and answer with citations to files and line numbers.
-3. Keep the index current on every push, re-embedding only the files that changed in the diff, and store the commit list with its messages.
-4. Add HNSW vector indexing in pgvector for sub-millisecond retrieval on large codebases.
-5. Multi-turn conversation history and a command-line client for follow-up questions.
-6. Make it usable by a small group: deployment, users with API keys, ownership checks, and per-repository webhook secrets.
-7. Splitting code by class and method (AST-aware chunking), keyword search combined with vector search (hybrid), and impact analysis.
+### V1 — Core Platform (Completed ✓)
+- [x] **Webhook Ingestion**: Fast asynchronous GitHub push receiver with HMAC SHA-256 signature verification and idempotency.
+- [x] **Background Job Worker**: Concurrent-safe queue (`FOR UPDATE SKIP LOCKED`), retry backoff, and orphan job crash recovery.
+- [x] **Automated Push Summaries**: Gemini-powered plain-language change summaries stored for every push.
+- [x] **Repository Tracking & Indexing**: Database tracking (`tracked_repositories`), zip-based repository ingestion, SHA-256 chunk deduplication.
+- [x] **Vector Storage (pgvector)**: 768-dimensional embeddings generated with `gemini-embedding-001` and cosine distance nearest-neighbor queries.
+- [x] **Grounded RAG Chat Endpoint**: `POST /api/repos/{owner}/{repo}/chat` with relevance score cutoff (hallucination prevention), grounded prompt assembly, and exact file/line citations.
+- [x] **Interactive CLI Chat Client**: `RippleChatCli` terminal client launched via `./chat.cmd` or `./chat.sh` with live repository status polling and commands.
+
+### V2 — Performance, Scale & Developer Experience (Next)
+1. **Differential Indexing on Push**: Re-embed only the files modified in `CompareResult` instead of re-downloading the entire zipball.
+2. **Postgres HNSW Vector Indexing**: Add `CREATE INDEX ... USING hnsw (embedding vector_cosine_ops)` to ensure sub-millisecond retrieval on large codebases.
+3. **Multi-turn Conversation History**: Session memory allowing natural follow-up questions in the CLI and API.
+4. **AST-Aware Semantic Chunking**: Split code by class and method boundaries using syntax tree parsing rather than fixed 40-line windows.
+5. **Hybrid Search (BM25 + Vector)**: Combine Postgres full-text search with vector similarity for exact identifier and symbol lookups.
+6. **GitHub App Comments**: Post change summaries directly back to GitHub PRs and commits as comments.
