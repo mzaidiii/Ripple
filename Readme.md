@@ -153,6 +153,41 @@ FROM change_summaries ORDER BY created_at DESC LIMIT 5;
 SELECT repo_full_name, count(*) FROM code_chunks GROUP BY repo_full_name;
 ```
 
+### Ask questions about a repository (Chat)
+
+Once indexed, send a question to the repository:
+
+```bash
+curl -X POST http://localhost:8080/api/repos/<owner>/<repo>/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "How are duplicate webhook deliveries handled?",
+    "topK": 5,
+    "minScore": 0.55
+  }'
+```
+
+The response includes the grounded answer, citations with exact file paths and line ranges, and similarity scores:
+
+```json
+{
+  "answer": "Duplicate webhook deliveries are handled primarily in WebhookService.java:29-32...",
+  "citations": [
+    {
+      "filePath": "src/main/java/org/personal/ripple/services/WebhookService.java",
+      "startLine": 20,
+      "endLine": 45,
+      "score": 0.884,
+      "snippetPreview": "if (webRepo.existsByDeliveryId(deliveryId)) {..."
+    }
+  ],
+  "model": "gemini-3.5-flash-lite",
+  "contextFound": true
+}
+```
+
+If no code chunks meet the confidence cutoff threshold, the API informs you instead of hallucinating.
+
 ## Verified behaviour
 
 These cases were tested manually against real repositories:
@@ -200,10 +235,10 @@ org.personal.ripple
 
 ## Roadmap
 
-1. Track repositories in a table and add an endpoint that starts indexing in the background.
-2. Keep the index current on every push, re-embedding only the files that changed, and store the commit list with its messages.
-3. Chat: embed the question, retrieve the closest chunks for that repository above a relevance cutoff, and answer with citations to files, line numbers, and commits. It should say it has no information when nothing relevant comes back. A command-line client will call it, with conversation history for follow-up questions.
-4. Make it usable by a small group: deployment, users with API keys and an ownership check on every request, a webhook secret per repository, and limits on repository size and request rate.
-5. Splitting code by class and method, keyword search combined with vector search, and impact analysis for Java code.
-6. Move to a GitHub App with installation tokens, and post summaries back to GitHub as comments.
-7. Hardening: Kafka in place of the job table, Redis, Testcontainers tests including concurrent workers, load tests, metrics.
+1. [x] Track repositories in a table and add an endpoint that starts indexing in the background.
+2. [x] Chat endpoint: embed the question, retrieve the closest chunks above a relevance cutoff, and answer with citations to files and line numbers.
+3. Keep the index current on every push, re-embedding only the files that changed in the diff, and store the commit list with its messages.
+4. Add HNSW vector indexing in pgvector for sub-millisecond retrieval on large codebases.
+5. Multi-turn conversation history and a command-line client for follow-up questions.
+6. Make it usable by a small group: deployment, users with API keys, ownership checks, and per-repository webhook secrets.
+7. Splitting code by class and method (AST-aware chunking), keyword search combined with vector search (hybrid), and impact analysis.
