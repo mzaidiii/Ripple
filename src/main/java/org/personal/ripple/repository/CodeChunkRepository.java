@@ -24,4 +24,17 @@ public interface CodeChunkRepository extends JpaRepository<CodeChunk , UUID> {
 
     List<CodeChunk> findByRepoFullName(String repoFullName);
 
+    @Query(value = """
+        SELECT file_path AS "filePath", start_line AS "startLine", end_line AS "endLine",
+               content AS "content",
+               1 - (embedding <=> CAST(:embedding AS vector)) AS "score"
+        FROM code_chunks
+        WHERE repo_full_name = :repo
+        ORDER BY embedding <=> CAST(:embedding AS vector)
+        LIMIT :limit
+        """, nativeQuery = true)
+    List<ChunkHit> findNearestHits(@Param("repo") String repo,
+                                   @Param("embedding") String embedding,
+                                   @Param("limit") int limit);
+
 }
