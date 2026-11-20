@@ -1,29 +1,30 @@
 # Ripple
 
-> An intelligent, context-aware repository intelligence platform and semantic code retrieval engine built with **Java 21**, **Spring Boot**, **PostgreSQL (`pgvector`)**, and the **Google Gemini API**.
+Ripple is an automated repository intelligence and semantic code-retrieval (RAG) platform. It keeps continuous track of a code repository so you never have to re-explain your codebase or manually copy-paste hundreds of lines into an LLM again.
+
+Ripple bridges your GitHub repositories with LLMs in two core ways:
+1. **Automated Commit Summaries**: Listens to GitHub push webhooks, calculates git diffs, and generates plain-language, high-level summaries of what changed and why it matters.
+2. **Semantic Code Search & Chat (RAG)**: Indexes codebase files into overlapping semantic chunks, generates vector embeddings using Gemini, stores them in PostgreSQL (`pgvector`), and powers an interactive grounded chat that cites exact file paths and line ranges.
 
 ---
 
-## What Exactly is Ripple?
+## The Problem Ripple Solves (And How I Encountered It)
 
-**Ripple** is a backend system designed to bridge the gap between large software codebases and Large Language Models (LLMs). Instead of dumping entire directories of code into prompts or repeatedly explaining your codebase structure, Ripple maintains an ongoing, living understanding of your repository.
+### The Problem
+Working with LLMs on real-world software projects is filled with friction:
+- **Context Window Bloat & Cost**: Dumping an entire project or huge source files into an LLM quickly exhausts token limits, increases API costs, and causes the model to suffer from "lost-in-the-middle" attention degradation.
+- **Hallucinations**: When an LLM lacks exact, ground-truth context about your class hierarchies, helper methods, or validation logic, it invents plausible-sounding methods that don't exist.
+- **Fast-Moving Codebases**: Codebases change on every push. Explaining yesterday's refactor or updated dependencies to a chat prompt over and over is tedious and error-prone.
 
-It does this through two core capabilities:
-1. **Automated Commit Summaries**: It listens to GitHub `push` webhooks in real time, fetches the exact commit diffs via GitHub's API, and uses Gemini to craft clear, human-readable summaries of what changed and why it matters.
-2. **Semantic Code Retrieval & Grounded Chat (RAG)**: It downloads and indexes repository snapshots, splits source files into overlapping windows, hashes each chunk to prevent redundant work, generates 768-dimensional vector embeddings, and stores them in PostgreSQL with `pgvector`. When you ask a question, Ripple retrieves only the few relevant snippets with similarity scores above a strict cutoff, feeding them to Gemini to generate answers backed by **exact file paths and line citations**.
+### How I Encountered It
+As a developer actively building and maintaining backend applications, I constantly found myself repeating the same manual loop:
+1. I’d make changes or refactor an architecture, then switch to an AI tool to brainstorm or debug.
+2. I’d have to manually copy-paste five different files into the prompt just to give the model the context it needed.
+3. Every time someone pushed code to GitHub, the AI's mental model was immediately outdated.
 
----
+I asked myself: **Why can't an AI assistant automatically stay in sync with my GitHub repository, know what changed on every push, and dynamically pull in only the 3 or 4 exact code snippets needed to answer any question?**
 
-## The Problem It Solves & How I Encountered It
-
-When working on software projects alongside AI models, I kept hitting the same frustrating wall:
-
-* **The "Context Amnesia" Tax**: Every time I opened a new chat or wanted to ask a question (*"How does our retry backoff work?"* or *"Where do we validate webhook signatures?"*), I had to manually copy-paste hundreds of lines of code or re-explain the whole architecture from scratch.
-* **Token Waste & Latency**: Feeding full files into an LLM context window quickly burns API quotas, incurs high token costs, and slows down responses.
-* **Codebases Evolve Fast**: In active projects with frequent commits, static documentation gets outdated immediately. An LLM that doesn't know what changed in the latest push will give stale or misleading advice.
-* **The Hallucination Trap**: Standard LLMs often guess method names or assume files exist when they lack exact context.
-
-I built **Ripple** to solve this permanently. I wanted a self-hosted, lightweight backend that acts as an automated repository memory bank. Whenever anyone pushes code, Ripple automatically digests the diff. When you have a question, you ask Ripple via terminal or API, and it pinpoints the exact 20–40 lines of code responsible, explaining it with surgical precision and citing the exact line numbers.
+That frustration led to the creation of **Ripple**.
 
 ---
 
@@ -95,6 +96,35 @@ sequenceDiagram
     IDX->>DB: delete chunks that no longer exist
 ```
 
+## How Chat & Semantic Retrieval Works (RAG)
+
+```mermaid
+sequenceDiagram
+    participant U as User / CLI
+    participant CC as Chat endpoint
+    participant CS as Chat service
+    participant EMB as Gemini embeddings
+    participant DB as PostgreSQL (pgvector)
+    participant LLM as Gemini LLM
+
+    U->>CC: Ask question about repo
+    CC->>CS: ask(repo, question, topK, minScore)
+    CS->>EMB: embedQuery(question) with task RETRIEVAL_QUERY
+    EMB-->>CS: 768-dimensional query vector
+    CS->>DB: findNearestHits(repo, vector, topK)
+    DB-->>CS: closest code chunks with cosine similarity scores
+    CS->>CS: filter chunks where score >= minScore (default 0.55)
+    alt No chunks pass cutoff
+        CS-->>CC: "No relevant code found" (prevents hallucination)
+        CC-->>U: safe refusal with 0 citations
+    else Relevant chunks found
+        CS->>LLM: generate answer grounded ONLY in code snippets
+        LLM-->>CS: grounded answer
+        CS-->>CC: answer + citations (filePath, startLine, endLine, score)
+        CC-->>U: formatted response with exact citations
+    end
+```
+
 ## Job lifecycle
 
 ```mermaid
@@ -145,7 +175,7 @@ Connection settings are in `src/main/resources/application.properties`. Four sec
 | `GITHUB_TOKEN` | token for reading diffs and repository contents from the GitHub API |
 | `GEMINI_API_KEY` | key for the Gemini API |
 
-The models are set with properties: `gemini.model` for summaries (currently `gemini-2.5-flash`), `gemini.embedding-model` for embeddings (currently `gemini-embedding-001`), and `gemini.embedding-dimensions`, which must match the vector column size (768).
+The models are set with properties: `gemini.model` for summaries (currently `gemini-3.5-flash-lite`), `gemini.embedding-model` for embeddings (currently `gemini-embedding-001`), and `gemini.embedding-dimensions`, which must match the vector column size (768).
 
 On the free tier of the Gemini API, Google's terms allow submitted content to be used to improve its products. Use public or throwaway repositories while testing, and check the provider's data terms before connecting private code.
 
@@ -325,13 +355,10 @@ org.personal.ripple
 
 ---
 
-## About Me
+## About the Author
 
-Hi, I'm **Mohd Murtaza** ([@mzaidiii](https://github.com/mzaidiii)).
+Hi! I'm **Mohamed Zaid** ([@mzaidiii](https://github.com/mzaidiii)).
 
-I'm a backend and systems software developer passionate about building resilient distributed systems, clean Java & Spring Boot architectures, and practical AI/LLM developer tooling. I love exploring the intersection of database internals, vector search (`pgvector`), and real-time developer workflows.
+I built **Ripple** out of a practical need to bridge LLMs with real-world, fast-evolving codebases without the friction of manual copy-pasting, bloated context windows, and hallucinations. I'm passionate about backend systems, distributed architectures, database internals, and building developer-first AI tools that solve everyday software engineering bottlenecks.
 
-Feel free to connect, collaborate, or share feedback:
-* **GitHub**: [@mzaidiii](https://github.com/mzaidiii)
-* **Email**: [mohdmurtaza153@gmail.com](mailto:mohdmurtaza153@gmail.com)
-* **Repository**: [https://github.com/mzaidiii/Ripple](https://github.com/mzaidiii/Ripple)
+Feel free to star the repo, open an issue or PR, or connect with me on GitHub!
