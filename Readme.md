@@ -1,5 +1,14 @@
 # Ripple
 
+[![Live Deployment](https://img.shields.io/badge/Render-Live%20Deployment-46E3B7?style=flat&logo=render&logoColor=white)](https://ripple-slke.onrender.com/actuator/health)
+[![Java 21](https://img.shields.io/badge/Java-21-ED8B00?style=flat&logo=openjdk&logoColor=white)](https://openjdk.org/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1.1-6DB33F?style=flat&logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
+[![PostgreSQL pgvector](https://img.shields.io/badge/PostgreSQL-pgvector-4169E1?style=flat&logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
+[![Gemini API](https://img.shields.io/badge/Google%20Gemini-Flash%20%26%20Embeddings-8E75B2?style=flat&logo=google&logoColor=white)](https://ai.google.dev/)
+
+> **Live Deployment:** [https://ripple-slke.onrender.com](https://ripple-slke.onrender.com)  
+> **Health Endpoint:** [https://ripple-slke.onrender.com/actuator/health](https://ripple-slke.onrender.com/actuator/health)
+
 Ripple is an automated repository intelligence and semantic code-retrieval (RAG) platform. It keeps continuous track of a code repository so you never have to re-explain your codebase or manually copy-paste hundreds of lines into an LLM again.
 
 Ripple bridges your GitHub repositories with LLMs in two core ways:
@@ -189,12 +198,16 @@ Flyway applies the migrations on startup. The server listens on port 8080 and th
 
 ### Connect a repository
 
-1. Start a tunnel with `ngrok http 8080`.
-2. In the repository settings, add a webhook with the payload URL `https://<your-tunnel-host>/api/webhooks/github`.
-3. Set the content type to `application/json`, use your `GITHUB_WEBHOOK_SECRET` as the secret, and select the push event only.
-4. Push a commit.
+1. In your GitHub repository settings, go to **Webhooks** $\to$ **Add webhook**.
+2. Set the **Payload URL**:
+   * **Live Render Deployment:** `https://ripple-slke.onrender.com/api/webhooks/github`
+   * **Or Local Testing:** Start a tunnel (`ngrok http 8080`) and use `https://<your-tunnel-host>/api/webhooks/github`
+3. Set the content type to `application/json`.
+4. Set the secret to your `GITHUB_WEBHOOK_SECRET`.
+5. Select **Just the push event**.
+6. Push a commit to your repository.
 
-The application log shows the push, the diff being fetched, and the summary. To read the stored results:
+The application automatically verifies the HMAC signature, fetches the diff from GitHub, generates a summary using Gemini Flash, and marks the job done:
 
 ```sql
 SELECT repo_full_name, status, attempts, finished_at
@@ -210,14 +223,25 @@ SELECT repo_full_name, count(*) FROM code_chunks GROUP BY repo_full_name;
 
 #### Option 1: Interactive CLI Tool (Recommended)
 
-Ripple includes an interactive terminal chat client. While the server is running, open a terminal and run:
+Ripple includes an interactive terminal chat client.
 
+**Connect to the live cloud deployment:**
 ```bash
-# On Windows
-.\chat.cmd <owner>/<repo>
+# Windows
+set RIPPLE_SERVER_URL=https://ripple-slke.onrender.com
+.\chat.cmd mzaidiii/Ripple
 
-# On Linux / macOS
-./chat.sh <owner>/<repo>
+# Linux / macOS
+RIPPLE_SERVER_URL=https://ripple-slke.onrender.com ./chat.sh mzaidiii/Ripple
+```
+
+**Or connect to a local server (`http://localhost:8080`):**
+```bash
+# Windows
+.\chat.cmd mzaidiii/Ripple
+
+# Linux / macOS
+./chat.sh mzaidiii/Ripple
 ```
 
 The CLI automatically verifies repository status, prompts to trigger indexing if needed, and starts an interactive session:
@@ -229,9 +253,9 @@ The CLI automatically verifies repository status, prompts to trigger indexing if
 ============================================================
 
 [✓] Repository status: READY (SHA: 4f1a8c9)
-Ready! Ask any question about octocat/Hello-World.
+Ready! Ask any question about mzaidiii/Ripple.
 
-[octocat/Hello-World] > How are duplicate webhook deliveries handled?
+[mzaidiii/Ripple] > How are duplicate webhook deliveries handled?
 Searching code chunks & generating grounded answer...
 
 ──────────────────────────────────────────────────────────────────────
@@ -259,13 +283,16 @@ Commands inside CLI:
 Send a `POST` request to `/api/repos/<owner>/<repo>/chat`:
 
 ```bash
-curl -X POST http://localhost:8080/api/repos/<owner>/<repo>/chat \
+# Live Cloud API
+curl -X POST https://ripple-slke.onrender.com/api/repos/mzaidiii/Ripple/chat \
   -H "Content-Type: application/json" \
   -d '{
     "question": "How are duplicate webhook deliveries handled?",
     "topK": 5,
     "minScore": 0.55
   }'
+
+# Or Local API (http://localhost:8080/api/repos/<owner>/<repo>/chat)
 ```
 
 Response format:
@@ -344,6 +371,7 @@ org.personal.ripple
 - [x] **Vector Storage (pgvector)**: 768-dimensional embeddings generated with `gemini-embedding-001` and cosine distance nearest-neighbor queries.
 - [x] **Grounded RAG Chat Endpoint**: `POST /api/repos/{owner}/{repo}/chat` with relevance score cutoff (hallucination prevention), grounded prompt assembly, and exact file/line citations.
 - [x] **Interactive CLI Chat Client**: `RippleChatCli` terminal client launched via `./chat.cmd` or `./chat.sh` with live repository status polling and commands.
+- [x] **Cloud Production Deployment**: Containerized with Docker and live on Render with PostgreSQL (`pgvector`) at [https://ripple-slke.onrender.com](https://ripple-slke.onrender.com).
 
 ### V2 — Performance, Scale & Developer Experience (Next)
 1. **Differential Indexing on Push**: Re-embed only the files modified in `CompareResult` instead of re-downloading the entire zipball.
