@@ -1,0 +1,48 @@
+# format: question | expected file(s), comma separated. A hit means any expected file shows up in the results.
+# Group 1: specific logic
+how does the app check that a pet has a name and a birth date when saving? | owner/PetValidator.java, owner/PetValidatorTests.java
+where is the rule that stops an owner from adding two pets with the same name? | owner/PetController.java, owner/Owner.java
+what stops a pet's birth date from being set in the future? | owner/PetController.java, owner/PetValidator.java
+how is an owner's telephone number validated? | owner/Owner.java
+how does searching owners by last name work and how are the results paged? | owner/OwnerController.java, owner/OwnerRepository.java
+how is a new visit attached to a pet? | owner/VisitController.java
+how does the app turn the text of a pet type from a form into a PetType object? | owner/PetTypeFormatter.java
+how is the list of vets cached? | system/CacheConfiguration.java
+how does the app switch the display language based on a request parameter? | system/WebConfiguration.java
+how is the number of specialties of a vet calculated? | vet/Vet.java
+
+# Group 2: structure
+which class handles the page that lists veterinarians? | vet/VetController.java
+which class wraps a list of vets so it can be returned as JSON or XML? | vet/Vets.java
+what does the database schema look like for the visits table? | schema.sql
+which entity stores the street address and city of a person who owns pets? | owner/Owner.java
+which base class gives every entity an id and tells whether it is new? | model/BaseEntity.java
+where is the home page handled? | system/WelcomeController.java
+which controller exists only to show what happens when an error is thrown? | system/CrashController.java
+which interface is used to load owners from the database? | owner/OwnerRepository.java
+which class models a single visit to the clinic with a date and a description? | owner/Visit.java
+which class registers the extra hints needed to build a native image? | PetClinicRuntimeHints.java
+
+# Group 3: phrased without the code's own words
+how do I run this application against PostgreSQL instead of the default database? | README.md, db/postgres/petclinic_db_setup_postgres.txt
+which test makes sure all the translated message files have the same keys? | system/I18nPropertiesSyncTest.java
+what sample data is inserted when the application starts? | data.sql
+how are vets and their areas of expertise linked in the database? | schema.sql
+what happens when someone submits the new owner form with required fields missing? | owner/OwnerController.java, owner/OwnerControllerTests.java
+how does the app show an owner's details together with their pets and past appointments? | owner/OwnerController.java
+which tests start a real database in a container? | PostgresIntegrationTests.java, MySqlIntegrationTests.java
+which Java version and Spring version does the project build with? | pom.xml
+where are the first name and last name of a human defined? | model/Person.java
+how are animal species like cat and dog stored? | owner/PetType.java, schema.sql, data.sql
+
+[OFFTOPIC]
+what is the capital of France
+how many calories are in a banana
+who is the prime minister of India
+best phone under 20000 rupees
+how to lose weight fast
+translate good morning into Spanish
+what is the weather in Lucknow today
+write me a poem about the ocean
+who won the cricket world cup
+how do I cook biryani
